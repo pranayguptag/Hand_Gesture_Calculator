@@ -6,6 +6,9 @@ import mediapipe as mp
 import streamlit as st
 import os
 
+# Your existing UI setup and button class goes here...
+# ... (all code from the top of your file down to the `run = st.checkbox` line)
+
 # === Streamlit Page Setup ===
 st.set_page_config(page_title="Hand Gesture Calculator", layout="wide")
 st.markdown("""
@@ -40,21 +43,6 @@ with col2:
     <p style='color: #00BFFF; font-size: 1em;'>Tip: Use good lighting and keep your hand steady for best results.</p>
 </div>
 """, unsafe_allow_html=True)
-
-with col1:
-    st.markdown("""
-<div style='background: #23272F; border-radius: 10px; padding: 10px; margin-bottom: 10px;'>
-    <h3 style='color: #FFD700; text-align: center;'>Live Calculator Panel</h3>
-</div>
-""", unsafe_allow_html=True)
-    run = st.checkbox('Run Calculator', value=False)
-    FRAME_WINDOW = st.empty()
-    expression_box = st.empty()
-
-# === Mediapipe Setup ===
-mp_hands = mp.solutions.hands
-mp_drawing = mp.solutions.drawing_utils
-hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.8, min_tracking_confidence=0.8)
 
 # === Button Class ===
 class Button:
@@ -95,25 +83,43 @@ for i in range(4):
 if 'calc_history' not in st.session_state:
     st.session_state['calc_history'] = []
 
-expression = ""
-last_click_time = 0
-click_delay = 1
+# Initialize expression and last click time in session state
+if 'expression' not in st.session_state:
+    st.session_state['expression'] = ""
+if 'last_click_time' not in st.session_state:
+    st.session_state['last_click_time'] = 0
 
-if run:
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 900)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 700)
-    answer = None
-    while True:
-        success, frame = cap.read()
-        if not success:
-            st.error("Camera not found!")
-            break
+# === Core Logic Using Streamlit Camera Input ===
+with col1:
+    st.markdown("""
+<div style='background: #23272F; border-radius: 10px; padding: 10px; margin-bottom: 10px;'>
+    <h3 style='color: #FFD700; text-align: center;'>Live Calculator Panel</h3>
+</div>
+""", unsafe_allow_html=True)
+    
+    st.markdown(f"""
+    <div style='background: #23272F; border-radius: 10px; padding: 10px; margin-top: 10px;'>
+        <h2 style='text-align: center; color: #FFD700;'>Expression: {st.session_state['expression']}</h2>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Use Streamlit's camera input instead of cv2.VideoCapture
+    camera_image_data = st.camera_input("Start Calculator (using Webcam)")
+    
+    if camera_image_data is not None:
+        # Convert the image from Streamlit to a NumPy array for OpenCV
+        file_bytes = np.asarray(bytearray(camera_image_data.read()), dtype=np.uint8)
+        frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+        # The rest of your processing logic can stay the same
         frame = cv2.flip(frame, 1)
-        frame = cv2.resize(frame, (900, 700))
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        result = hands.process(rgb)
+        
+        mp_hands = mp.solutions.hands
+        hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.8, min_tracking_confidence=0.8)
+        mp_drawing = mp.solutions.drawing_utils
 
+        result = hands.process(rgb)
         h, w, c = frame.shape
 
         # Draw all buttons
@@ -122,7 +128,7 @@ if run:
 
         # Display the current expression
         cv2.rectangle(frame, (50, 50), (450, 130), (0, 0, 0), cv2.FILLED)
-        cv2.putText(frame, expression, (60, 115), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 255, 255), 2)
+        cv2.putText(frame, st.session_state['expression'], (60, 115), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 255, 255), 2)
 
         if result.multi_hand_landmarks:
             hand_landmarks = result.multi_hand_landmarks[0]
@@ -142,43 +148,33 @@ if run:
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                 current_time = time.time()
 
-                if length < 40 and (current_time - last_click_time) > click_delay:
+                if length < 40 and (current_time - st.session_state['last_click_time']) > 1: # use session state
                     for button in button_list:
                         if button.is_hover(cx, cy):
                             selected = button.value
-
                             if selected == "C":
-                                expression = ""
+                                st.session_state['expression'] = ""
                             elif selected == "=":
                                 try:
-                                    answer = str(eval(expression))
-                                    st.session_state['calc_history'].append((expression, answer))
-                                    expression = answer
+                                    answer = str(eval(st.session_state['expression']))
+                                    st.session_state['calc_history'].append((st.session_state['expression'], answer))
+                                    st.session_state['expression'] = answer
                                 except:
                                     answer = "Error"
-                                    st.session_state['calc_history'].append((expression, answer))
-                                    expression = answer
+                                    st.session_state['calc_history'].append((st.session_state['expression'], answer))
+                                    st.session_state['expression'] = answer
                             else:
-                                expression += selected
+                                st.session_state['expression'] += selected
+                            
+                            st.session_state['last_click_time'] = current_time
 
-                            last_click_time = current_time
+                            # Visual feedback
+                            cv2.circle(frame, (cx, cy), 15, (0, 255, 255), cv2.FILLED)
 
-                    # Visual feedback
-                    cv2.circle(frame, (cx, cy), 15, (0, 255, 255), cv2.FILLED)
+        # Display the processed frame
+        st.image(frame, channels="BGR", use_column_width=True)
 
-        FRAME_WINDOW.image(frame, channels="BGR")
-        expression_box.markdown(f"""
-        <div style='background: #23272F; border-radius: 10px; padding: 10px; margin-top: 10px;'>
-            <h2 style='text-align: center; color: #FFD700;'>Expression: {expression}</h2>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Streamlit doesn't support cv2.waitKey for quitting, so break if checkbox is unchecked
-        if not run:
-            cap.release()
-            break
-
-# Show calculation history below camera (only once, persistent)
+# Show calculation history below camera
 if st.session_state['calc_history']:
     st.markdown("""
     <div style='background: #23272F; border-radius: 10px; padding: 10px; margin-top: 20px;'>
@@ -188,11 +184,3 @@ if st.session_state['calc_history']:
     for expr, ans in reversed(st.session_state['calc_history'][-10:]):
         st.markdown(f"<li><span style='color:#FFD700;'>{expr}</span> = <b style='color:#32CD32;'>{ans}</b></li>", unsafe_allow_html=True)
     st.markdown("</ul></div>", unsafe_allow_html=True)
-
-if not run:
-    st.markdown("""
-    <div style='background: #191970; border-radius: 10px; padding: 20px; margin-top: 20px;'>
-        <h3 style='color: #FFD700; text-align: center;'>Enable <b>Run Calculator</b> to start the live hand gesture calculator.</h3>
-        <p style='color: #00BFFF; text-align: center;'>Your camera feed will appear here once you start.</p>
-    </div>
-    """, unsafe_allow_html=True)
