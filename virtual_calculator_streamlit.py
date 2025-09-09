@@ -4,7 +4,7 @@ import time
 import math
 import mediapipe as mp
 import streamlit as st
-import os
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 
 # Your existing UI setup and button class goes here...
 # ... (all code from the top of your file down to the `run = st.checkbox` line)
@@ -82,53 +82,34 @@ for i in range(4):
 # Calculation history
 if 'calc_history' not in st.session_state:
     st.session_state['calc_history'] = []
-
-# Initialize expression and last click time in session state
 if 'expression' not in st.session_state:
     st.session_state['expression'] = ""
 if 'last_click_time' not in st.session_state:
     st.session_state['last_click_time'] = 0
 
-# === Core Logic Using Streamlit Camera Input ===
-with col1:
-    st.markdown("""
-<div style='background: #23272F; border-radius: 10px; padding: 10px; margin-bottom: 10px;'>
-    <h3 style='color: #FFD700; text-align: center;'>Live Calculator Panel</h3>
-</div>
-""", unsafe_allow_html=True)
-    
-    st.markdown(f"""
-    <div style='background: #23272F; border-radius: 10px; padding: 10px; margin-top: 10px;'>
-        <h2 style='text-align: center; color: #FFD700;'>Expression: {st.session_state['expression']}</h2>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Use Streamlit's camera input instead of cv2.VideoCapture
-    camera_image_data = st.camera_input("Start Calculator (using Webcam)")
-    
-    if camera_image_data is not None:
-        # Convert the image from Streamlit to a NumPy array for OpenCV
-        file_bytes = np.asarray(bytearray(camera_image_data.read()), dtype=np.uint8)
-        frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+# === Video Processor Class ===
+class HandGestureVideoProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.8, min_tracking_confidence=0.8)
+        self.mp_drawing = mp.solutions.drawing_utils
 
-        # The rest of your processing logic can stay the same
-        frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    def recv(self, frame):
+        # Convert the frame to a format compatible with OpenCV
+        frm = frame.to_ndarray(format="bgr24")
         
-        mp_hands = mp.solutions.hands
-        hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.8, min_tracking_confidence=0.8)
-        mp_drawing = mp.solutions.drawing_utils
-
-        result = hands.process(rgb)
-        h, w, c = frame.shape
+        # --- Your existing processing logic from the `while` loop ---
+        rgb = cv2.cvtColor(frm, cv2.COLOR_BGR2RGB)
+        result = self.hands.process(rgb)
+        h, w, c = frm.shape
 
         # Draw all buttons
         for button in button_list:
-            button.draw(frame)
+            button.draw(frm)
 
         # Display the current expression
-        cv2.rectangle(frame, (50, 50), (450, 130), (0, 0, 0), cv2.FILLED)
-        cv2.putText(frame, st.session_state['expression'], (60, 115), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 255, 255), 2)
+        cv2.rectangle(frm, (50, 50), (450, 130), (0, 0, 0), cv2.FILLED)
+        cv2.putText(frm, st.session_state.get('expression', ''), (60, 115), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 255, 255), 2)
 
         if result.multi_hand_landmarks:
             hand_landmarks = result.multi_hand_landmarks[0]
@@ -137,18 +118,16 @@ with col1:
                 cx, cy = int(lm.x * w), int(lm.y * h)
                 lm_list.append((cx, cy))
 
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            self.mp_drawing.draw_landmarks(frm, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
 
-            # Check for pinch (thumb tip & index tip)
             if lm_list:
-                x1, y1 = lm_list[4]   # Thumb tip
-                x2, y2 = lm_list[8]   # Index tip
+                x1, y1 = lm_list[4]
+                x2, y2 = lm_list[8]
                 length = math.hypot(x2 - x1, y2 - y1)
-
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                 current_time = time.time()
 
-                if length < 40 and (current_time - st.session_state['last_click_time']) > 1: # use session state
+                if length < 40 and (current_time - st.session_state.get('last_click_time', 0)) > 1:
                     for button in button_list:
                         if button.is_hover(cx, cy):
                             selected = button.value
@@ -168,13 +147,30 @@ with col1:
                             
                             st.session_state['last_click_time'] = current_time
 
-                            # Visual feedback
-                            cv2.circle(frame, (cx, cy), 15, (0, 255, 255), cv2.FILLED)
+                            cv2.circle(frm, (cx, cy), 15, (0, 255, 255), cv2.FILLED)
 
-        # Display the processed frame
-        st.image(frame, channels="BGR", use_column_width=True)
+        return frm
 
-# Show calculation history below camera
+# === Streamlit App Logic ===
+with col1:
+    st.markdown("""
+<div style='background: #23272F; border-radius: 10px; padding: 10px; margin-bottom: 10px;'>
+    <h3 style='color: #FFD700; text-align: center;'>Live Calculator Panel</h3>
+</div>
+""", unsafe_allow_html=True)
+
+    # Display the expression box dynamically outside the video stream
+    expression_placeholder = st.empty()
+    expression_placeholder.markdown(f"""
+    <div style='background: #23272F; border-radius: 10px; padding: 10px; margin-top: 10px;'>
+        <h2 style='text-align: center; color: #FFD700;'>Expression: {st.session_state.get('expression', '')}</h2>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Use webrtc_streamer for live video feed
+    webrtc_streamer(key="gesture_calculator", video_processor_factory=HandGestureVideoProcessor)
+
+# Show calculation history below the video stream
 if st.session_state['calc_history']:
     st.markdown("""
     <div style='background: #23272F; border-radius: 10px; padding: 10px; margin-top: 20px;'>
