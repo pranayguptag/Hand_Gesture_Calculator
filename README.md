@@ -55,22 +55,14 @@ An interactive calculator powered by hand gesture recognition using MediaPipe an
 
 ## 📸 Screenshots
 
-Add screenshots of your app here:
-
-```
-![Calculator UI](screenshots/calculator_ui.png)
-![Hand Gesture Example](screenshots/hand_gesture.png)
-```
+![Calculator UI](https://github.com/pranayguptag/Hand_Gesture_Calculator/blob/main/Media/Home.png)
+![Hand Gesture Example](https://github.com/pranayguptag/Hand_Gesture_Calculator/blob/main/Media/Cam.png)
 
 ---
 
 ## 🎬 Demo Video
 
-Add a demo video here:
-
-```
-[![Watch the demo](screenshots/demo_thumb.png)](https://www.youtube.com/watch?v=YOUR_VIDEO_LINK)
-```
+https://github.com/user-attachments/assets/3014ef38-6f18-4446-a48e-cd8c5e770202
 
 ---
 
